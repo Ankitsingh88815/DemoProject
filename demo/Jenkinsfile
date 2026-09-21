@@ -6,6 +6,7 @@ pipeline {
         BASTION_IP   = "13.203.212.209"
         SPRING_IP    = "10.0.0.181"
         DB_IP        = "10.0.0.153"
+        DB_PASS = "Anki@9555976082"
     }
 
     stages {
