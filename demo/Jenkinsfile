@@ -1,25 +1,20 @@
 pipeline {
     agent any
-
     environment {
+        // Replace these with your actual values
         DOCKER_IMAGE = "adi1310/demo-spring"
-        BASTION_IP   = "13.203.212.209"
-        SPRING_IP    = "10.0.0.181"
-        DB_IP        = "10.0.0.153"
+        BASTION_IP = "13.203.212.209"      // Put your actual Public NAT/Bastion IP here (e.g., 3.7.x.x)
+        SPRING_IP = "10.0.0.181"     
+        DB_IP = "10.0.0.153"         
+        DB_PASS = "Anki@9555976082" 
     }
-
     stages {
-        stage('Compile & Package') {
-            steps {
-                sh './mvnw clean package -DskipTests'
-            }
-        }
-
-        stage('Dockerize & Publish') {
+        stage('Build & Push Docker Image') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
                     sh '''
-                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                        echo $DH_PASS | docker login -u $DH_USER --password-stdin
+                        # Docker handles the Maven compilation automatically here
                         docker build -t ${DOCKER_IMAGE}:latest -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
                         docker push ${DOCKER_IMAGE}:latest
                         docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
@@ -27,37 +22,33 @@ pipeline {
                 }
             }
         }
-
-        stage('Secure Remote Deployment') {
+        stage('Deploy to Private AWS EC2') {
             steps {
-                withCredentials([string(credentialsId: 'mysql-db-password', variable: 'DB_PASS')]) {
-                    sshagent(credentials: ['aws-pem-key']) {
-                        sh '''
-                            SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-                            
-                            ssh $SSH_OPTS -J ubuntu@${BASTION_IP} ubuntu@${SPRING_IP} << EOF
-                                docker pull ${DOCKER_IMAGE}:latest
-                                docker rm -f spring-app || true
-                                
-                                docker run -d \\
-                                    --name spring-app \\
-                                    --restart always \\
-                                    -p 8080:8080 \\
-                                    -e SPRING_DATASOURCE_URL="jdbc:mysql://${DB_IP}:3306/mydatabase?useSSL=false&allowPublicKeyRetrieval=true" \\
-                                    -e SPRING_DATASOURCE_USERNAME="root" \\
-                                    -e SPRING_DATASOURCE_PASSWORD="${DB_PASS}" \\
-                                    ${DOCKER_IMAGE}:latest
-EOF
-                        '''
-                    }
+                sshagent(credentials: ['aws-pem-key']) {
+                    sh '''
+                        # Disable host key checking to prevent automated prompts from failing
+                        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+                        # SSH via Bastion proxy jump to execute deployment commands on the Private EC2
+                        ssh $SSH_OPTS -J ubuntu@${BASTION_IP} ubuntu@${SPRING_IP} """
+                            docker pull ${DOCKER_IMAGE}:latest
+                            docker rm -f spring-app || true
+                            docker run -d \\
+                                --name spring-app \\
+                                --restart always \\
+                                -p 8080:8080 \\
+                                -e SPRING_DATASOURCE_URL='jdbc:mysql://${DB_IP}:3306/mydatabase?useSSL=false&allowPublicKeyRetrieval=true' \\
+                                -e SPRING_DATASOURCE_USERNAME='root' \\
+                                -e SPRING_DATASOURCE_PASSWORD='${DB_PASS}' \\
+                                ${DOCKER_IMAGE}:latest
+                        """
+                    '''
                 }
             }
         }
     }
-
     post {
         always {
-            sh 'docker logout'
+            sh 'docker logout || true'
             cleanWs()
         }
     }
