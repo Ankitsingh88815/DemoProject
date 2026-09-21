@@ -25,13 +25,14 @@ pipeline {
             }
         }
  
-        stage('Deploy to Private AWS EC2') {
+stage('Deploy to Private AWS EC2') {
             steps {
                 sshagent(credentials: ['aws-pem-key']) {
                     sh '''
-                        # SSH via Bastion proxy jump with host key checking disabled for both hops
+                        # Forcefully route through the bastion while disabling host key checking globally for both connections
                         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-                            -J ubuntu@${BASTION_IP} ubuntu@${SPRING_IP} """
+                            -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ubuntu@${BASTION_IP}" \
+                            ubuntu@${SPRING_IP} """
                             docker pull ${DOCKER_IMAGE}:latest
                             docker rm -f spring-app || true
                             docker run -d \\
@@ -47,7 +48,6 @@ pipeline {
                 }
             }
         }
-    }
     post {
         always {
             sh 'docker logout || true'
