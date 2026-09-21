@@ -1,13 +1,14 @@
 pipeline {
     agent any
+ 
     environment {
-        // Replace these with your actual values
         DOCKER_IMAGE = "adi1310/demo-spring"
-        BASTION_IP = "13.203.212.209"      // Put your actual Public NAT/Bastion IP here (e.g., 3.7.x.x)
-        SPRING_IP = "10.0.0.181"     
-        DB_IP = "10.0.0.153"         
+        BASTION_IP = "13.203.212.209"
+        SPRING_IP = "10.0.0.181"      
+        DB_IP = "10.0.0.153"          
         DB_PASS = "Anki@9555976082" 
     }
+ 
     stages {
         stage('Build & Push Docker Image') {
             steps {
@@ -23,14 +24,14 @@ pipeline {
                 }
             }
         }
+ 
         stage('Deploy to Private AWS EC2') {
             steps {
                 sshagent(credentials: ['aws-pem-key']) {
                     sh '''
-                        # Disable host key checking to prevent automated prompts from failing
-                        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-                        # SSH via Bastion proxy jump to execute deployment commands on the Private EC2
-                        ssh $SSH_OPTS -J ubuntu@${BASTION_IP} ubuntu@${SPRING_IP} """
+                        # SSH via Bastion proxy jump with host key checking disabled for both hops
+                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                            -J ubuntu@${BASTION_IP} ubuntu@${SPRING_IP} """
                             docker pull ${DOCKER_IMAGE}:latest
                             docker rm -f spring-app || true
                             docker run -d \\
