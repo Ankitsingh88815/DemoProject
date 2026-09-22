@@ -1,0 +1,58 @@
+pipeline {
+    agent any
+ 
+    environment {
+        DOCKER_IMAGE = "adi1310/demo-spring"
+        BASTION_IP   = "15.252.137.122" 
+        SPRING_IP    = "10.0.0.181"
+        DB_IP        = "10.0.0.153"
+        DB_PASS      = "Anki@9555976082"
+    }
+ 
+    stages {
+        stage('Build & Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+                    sh '''
+                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                        cd demo
+                        docker build -t ${DOCKER_IMAGE}:latest -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
+                        docker push ${DOCKER_IMAGE}:latest
+                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                    '''
+                }
+            }
+        }
+ 
+        stage('Deploy to Private AWS EC2') {
+            steps {
+                sshagent(credentials: ['aws-pem-key']) {
+                    sh """
+                        # Connect through Bastion to Private EC2 and restart the application
+                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
+                            -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ubuntu@${BASTION_IP}" \\
+                            ubuntu@${SPRING_IP} "
+                                docker pull ${DOCKER_IMAGE}:latest
+                                docker rm -f spring-app || true
+                                docker run -d \\
+                                    --name spring-app \\
+                                    --restart always \\
+                                    -p 8080:8080 \\
+                                    -e SPRING_DATASOURCE_URL='jdbc:mysql://${DB_IP}:3306/mydatabase?useSSL=false&allowPublicKeyRetrieval=true' \\
+                                    -e SPRING_DATASOURCE_USERNAME='root' \\
+                                    -e SPRING_DATASOURCE_PASSWORD='${DB_PASS}' \\
+                                    ${DOCKER_IMAGE}:latest
+                            "
+                    """
+                }
+            }
+        }
+    }
+ 
+    post {
+        always {
+            sh 'docker logout || true'
+            cleanWs()
+        }
+    }
+}
