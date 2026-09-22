@@ -3,7 +3,7 @@ pipeline {
  
     environment {
         DOCKER_IMAGE = "adi1310/demo-spring"
-        BASTION_IP   = "13.203.212.209"
+        BASTION_IP   = "15.252.137.122" 
         SPRING_IP    = "10.0.0.181"
         DB_IP        = "10.0.0.153"
         DB_PASS      = "Anki@9555976082"
@@ -28,6 +28,7 @@ pipeline {
             steps {
                 sshagent(credentials: ['aws-pem-key']) {
                     sh """
+                        # Connect through Bastion to Private EC2 and restart the application
                         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
                             -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ubuntu@${BASTION_IP}" \\
                             ubuntu@${SPRING_IP} "
