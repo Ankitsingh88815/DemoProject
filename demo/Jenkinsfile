@@ -26,30 +26,23 @@ pipeline {
  
         stage('Deploy to Private AWS EC2') {
             steps {
-                // Securely fetch DB_PASS from Jenkins Credentials (or use the environment variable fallback)
-                withCredentials([string(credentialsId: 'db-password', ignoreMissing: true, variable: 'CRED_DB_PASS')]) {
-                    sshagent(credentials: ['aws-pem-key']) {
-                        script {
-                            // Safely evaluate the database password from credentials or environment fallback
-                            def activeDbPass = env.CRED_DB_PASS ?: env.DB_PASS
-                            sh """
-                                ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
-                                    -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ubuntu@${BASTION_IP}" \\
-                                    ubuntu@${SPRING_IP} "
-                                        docker pull ${DOCKER_IMAGE}:latest
-                                        docker rm -f spring-app || true
-                                        docker run -d \\
-                                            --name spring-app \\
-                                            --restart always \\
-                                            -p 8080:8080 \\
-                                            -e SPRING_DATASOURCE_URL='jdbc:mysql://${DB_IP}:3306/mydatabase?useSSL=false&allowPublicKeyRetrieval=true' \\
-                                            -e SPRING_DATASOURCE_USERNAME='root' \\
-                                            -e SPRING_DATASOURCE_PASSWORD='${activeDbPass}' \\
-                                            ${DOCKER_IMAGE}:latest
-                                    "
-                            """
-                        }
-                    }
+                sshagent(credentials: ['aws-pem-key']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
+                            -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ubuntu@${BASTION_IP}" \\
+                            ubuntu@${SPRING_IP} "
+                                docker pull ${DOCKER_IMAGE}:latest
+                                docker rm -f spring-app || true
+                                docker run -d \\
+                                    --name spring-app \\
+                                    --restart always \\
+                                    -p 8080:8080 \\
+                                    -e SPRING_DATASOURCE_URL='jdbc:mysql://${DB_IP}:3306/mydatabase?useSSL=false&allowPublicKeyRetrieval=true' \\
+                                    -e SPRING_DATASOURCE_USERNAME='root' \\
+                                    -e SPRING_DATASOURCE_PASSWORD='${DB_PASS}' \\
+                                    ${DOCKER_IMAGE}:latest
+                            "
+                    """
                 }
             }
         }
