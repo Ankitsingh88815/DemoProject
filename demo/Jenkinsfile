@@ -1,58 +1,38 @@
 pipeline {
     agent any
- 
     environment {
-        DOCKER_IMAGE = "adi1310/demo-spring"
-        BASTION_IP   = "15.252.137.122" 
-        SPRING_IP    = "10.0.0.181"
-        DB_IP        = "10.0.0.153"
-        DB_PASS      = "Anki@9555976082"
+        // Pulls username/password from Jenkins credentials
+        DOCKER_CREDS = credentials('dockerhub-creds')
+        IMAGE_NAME = 'adi1310/demo-spring:latest'
     }
  
     stages {
+        stage('Build Spring Boot App') {
+            steps {
+                // Assuming you use Maven inside your project directory
+                sh './mvnw clean package -DskipTests'
+            }
+        }
         stage('Build & Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
-                    sh '''
-                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
-                        cd demo
-                        docker build -t ${DOCKER_IMAGE}:latest -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
-                        docker push ${DOCKER_IMAGE}:latest
-                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
-                    '''
-                }
+                sh "docker build -t ${IMAGE_NAME} ."
+                sh "echo \$DOCKER_CREDS_PSW | docker login -u \$DOCKER_CREDS_USR --password-stdin"
+                sh "docker push ${IMAGE_NAME}"
             }
         }
  
-        stage('Deploy to Private AWS EC2') {
+        stage('Deploy to AWS EKS') {
             steps {
-                sshagent(credentials: ['aws-pem-key']) {
-                    sh """
-                        # Connect through Bastion to Private EC2 and restart the application
-                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
-                            -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ubuntu@${BASTION_IP}" \\
-                            ubuntu@${SPRING_IP} "
-                                docker pull ${DOCKER_IMAGE}:latest
-                                docker rm -f spring-app || true
-                                docker run -d \\
-                                    --name spring-app \\
-                                    --restart always \\
-                                    -p 8080:8080 \\
-                                    -e SPRING_DATASOURCE_URL='jdbc:mysql://${DB_IP}:3306/mydatabase?useSSL=false&allowPublicKeyRetrieval=true' \\
-                                    -e SPRING_DATASOURCE_USERNAME='root' \\
-                                    -e SPRING_DATASOURCE_PASSWORD='${DB_PASS}' \\
-                                    ${DOCKER_IMAGE}:latest
-                            "
-                    """
+                // Uses the Kubernetes CLI plugin and your uploaded yaml file
+                withKubeConfig([credentialsId: 'eks-kubeconfig']) {
+                    // Apply your existing deployment and service configurations
+                    sh 'kubectl apply -f deployment.yaml'
+                    // Force EKS to restart the pods so they pull your newly pushed 'latest' image
+                    sh 'kubectl rollout restart deployment/spring-app-deployment'
+                    // Verify the status
+                    sh 'kubectl get pods'
                 }
             }
-        }
-    }
- 
-    post {
-        always {
-            sh 'docker logout || true'
-            cleanWs()
         }
     }
 }
